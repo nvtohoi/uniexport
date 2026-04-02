@@ -7,50 +7,39 @@ blockedBy: []
 blocks: []
 ---
 
-# WMS Power Platform Build Kit (v2 — ACS Integration)
+# WMS Power Platform Build Kit (v3 — Full Build)
 
-Build kit for WMS on Power Platform. Module Cân xe tích hợp từ ACS AMMS IoT (SQL Server) thay vì build mới.
+Build kit cho hệ thống WMS 3 modules trên Power Platform. Tự build toàn bộ, thay thế ACS.
 
 ## Context
 
-- **Brainstorm:** `plans/reports/brainstorm-260402-1350-wms-power-platform-design-review.md`
-- **So sánh:** `plans/reports/brainstorm-260402-1445-so-sanh-power-apps-web-app-desktop.md`
-- **ACS Analysis:** `plans/reports/brainstorm-260402-1521-acs-amms-data-integration.md`
-- **User role:** Solution architect extending existing M365
+- **Reports:** `plans/reports/brainstorm-260402-*.md`
+- **User role:** Solution architect, full dev team (3+), extending existing M365
 - **Stack:** Power Apps Canvas + SharePoint Online + Power Automate + Power BI
-- **Existing system:** ACS AMMS IoT (SQL Server `ACSAMMS_TAMPHUOC`) — quản lý cân xe
-- **Scale:** 100+ users, 3 modules (Kho build mới, Van tai build mới, Can xe đọc từ ACS)
+- **Scale:** 100+ users, 3 modules
 - **Timeline:** No fixed deadline
+- **Quyết định:** Bỏ ACS AMMS IoT (đang thuê), tự build module Cân xe trên Power Apps
+- **Hardware cân:** Sẽ cần giải pháp kết nối cân điện tử (manual entry MVP, sau đó CSV/API)
 
 ## Phases
 
-| # | Phase | Status | Priority | Effort | Thay đổi v2 |
-|---|-------|--------|----------|--------|-------------|
-| 0 | [ACS Data Gateway Setup](phase-00-acs-data-gateway.md) | pending | P0 | Low | **MỚI** |
-| 1 | [SharePoint Provisioning Scripts](phase-01-sharepoint-provisioning.md) | pending | P0 | Medium | Giảm (bỏ CAN lists) |
-| 2 | [Module Kho Reference Docs](phase-02-module-kho.md) | pending | P0 | Medium | Không đổi |
-| 3 | [Module Van Tai Reference Docs](phase-03-module-van-tai.md) | pending | P0 | Medium | Không đổi |
-| 4 | [Module Cân Xe — ACS Integration](phase-04-module-can-xe.md) | pending | P1 | Low | **ĐỔI: đọc từ ACS, không build** |
-| 5 | [Power Automate Flow Configs](phase-05-power-automate-flows.md) | pending | P0 | Medium | Thêm ACS sync flow, bỏ flow cân |
-| 6 | [Power BI Dashboards](phase-06-power-bi-dashboards.md) | pending | P1 | Medium | **MỚI** — thay thế security-only |
-| 7 | [Security & Deployment Guide](phase-07-security-deployment.md) | pending | P1 | Medium | Đổi số, thêm Gateway |
+| # | Phase | Status | Priority | Effort |
+|---|-------|--------|----------|--------|
+| 1 | [SharePoint Provisioning Scripts](phase-01-sharepoint-provisioning.md) | pending | P0 | High |
+| 2 | [Module Kho Reference Docs](phase-02-module-kho.md) | pending | P0 | Medium |
+| 3 | [Module Van Tai Reference Docs](phase-03-module-van-tai.md) | pending | P0 | Medium |
+| 4 | [Module Can Xe Reference Docs](phase-04-module-can-xe.md) | pending | P0 | High |
+| 5 | [Power Automate Flow Configs](phase-05-power-automate-flows.md) | pending | P0 | High |
+| 6 | [Security & Deployment Guide](phase-06-security-deployment.md) | pending | P1 | Medium |
 
 ## Dependencies
 
-```
-Phase 0 (Gateway) ──→ Phase 4 (Cân xe ACS) ──→ Phase 6 (Power BI)
-                  ──→ Phase 5 (Flows, ACS sync part)
-Phase 1 (SharePoint) ──→ Phase 2 (Kho)
-                     ──→ Phase 3 (Van tai)
-                     ──→ Phase 5 (Flows, non-ACS part)
-All phases ──→ Phase 7 (Security & Deploy)
-```
+- Phase 1 (SharePoint) must be built first — all other phases reference its data model
+- Phases 2, 3, 4 are independent, can be built in parallel
+- Phase 5 (flows) depends on Phase 1 data model
+- Phase 6 (security) depends on all prior phases
 
-- Phase 0 + Phase 1 can run in parallel (independent)
-- Phase 2, 3, 4 can run in parallel after their dependencies
-- Phase 6 (Power BI) after Phase 0 gateway is set up
-
-## Critical Fixes (giữ nguyên)
+## Critical Fixes
 
 1. Stock counter race condition → queue pattern (`KHO_GiaoDichLog`)
 2. Phieu auto-number → `SYS_Counters` + Power Automate atomic increment
@@ -58,26 +47,39 @@ All phases ──→ Phase 7 (Security & Deploy)
 4. Monthly archival strategy for staying under 5000-item threshold
 5. Proper security at SharePoint level, not just UI hiding
 
-## Key Change: ACS Integration
+## Cân xe Strategy (thay thế ACS)
 
-Module Cân xe **không build mới** — dữ liệu cân đọc từ ACS AMMS IoT:
-- ACS desktop app xử lý hardware (cân + camera + cảm biến)
-- SQL Server `ACSAMMS_TAMPHUOC` chứa dữ liệu phiếu cân
-- On-Premises Data Gateway kết nối SQL → Power BI + Power Automate
-- Power BI dashboard cho báo cáo cân xe
-- Power Automate sync dữ liệu cân → SharePoint (nếu cần hiển thị trong Power Apps)
+- **Phase 1 (MVP):** Nhập tay số cân vào Power Apps + chụp ảnh xe
+- **Phase 2 (sau):** Scale software xuất CSV → Power Automate import tự động
+- **Phase 3 (nâng cao):** Desktop agent đọc COM port → WebSocket → Power Apps realtime
+- Data model tham khảo từ ACS AMMS IoT (đã phân tích giao diện)
+
+## Insights từ ACS (áp dụng vào thiết kế)
+
+Từ phân tích ACS desktop + web portal:
+- Hỗ trợ 2 lần cân (cân vào + cân ra) trên cùng 1 phiếu
+- 3 camera giám sát (biển số + cân vào + cân ra)
+- Phân loại: Cân nhập / Cân xuất / Tự động
+- Báo cáo: theo KH, hàng hóa, xe, tổng hợp nhập xuất
+- Fields: Số phiếu, Biển số, Rơ mooc, KH/NCC, Hàng hóa, Kho, Nhà vận tải, Lái xe
 
 ## Output Structure
 
 ```
 plans/260402-1350-wms-power-platform-build-kit/
 ├── plan.md
-├── phase-00-acs-data-gateway.md          # MỚI: Gateway + SQL connection
-├── phase-01-sharepoint-provisioning.md   # CẬP NHẬT: bỏ CAN lists
-├── phase-02-module-kho.md                # Không đổi
-├── phase-03-module-van-tai.md            # Không đổi
-├── phase-04-module-can-xe.md             # CẬP NHẬT: ACS integration
-├── phase-05-power-automate-flows.md      # CẬP NHẬT: thêm ACS sync
-├── phase-06-power-bi-dashboards.md       # MỚI
-└── phase-07-security-deployment.md       # Đổi số từ 06
+├── phase-01-sharepoint-provisioning.md
+├── phase-02-module-kho.md
+├── phase-03-module-van-tai.md
+├── phase-04-module-can-xe.md
+├── phase-05-power-automate-flows.md
+└── phase-06-security-deployment.md
+
+scripts/
+├── provision-sharepoint-site.ps1
+├── provision-module-kho-lists.ps1
+├── provision-module-vantai-lists.ps1
+├── provision-module-canxe-lists.ps1
+├── provision-system-lists.ps1
+└── provision-indexes-and-views.ps1
 ```

@@ -1,181 +1,230 @@
-# Phase 4: Module Cân Xe — ACS Integration (v2)
+# Phase 4: Module Cân Xe — Full Build (v3)
 
 ## Context
 - [Plan Overview](plan.md)
-- [Phase 0 — ACS Gateway](phase-00-acs-data-gateway.md)
-- [ACS Analysis](../reports/brainstorm-260402-1521-acs-amms-data-integration.md)
+- [Phase 1 — Data Model](phase-01-sharepoint-provisioning.md)
+- [ACS Analysis](../reports/brainstorm-260402-1521-acs-amms-data-integration.md) — tham khảo thiết kế
 
 ## Overview
-- **Priority:** P1
+- **Priority:** P0
 - **Status:** pending
-- **Description:** Tích hợp dữ liệu cân từ ACS AMMS IoT (SQL Server) vào Power Apps/SharePoint. **KHÔNG build module cân mới** — ACS desktop app xử lý hardware + nhập liệu.
+- **Description:** Build module Cân xe trên Power Apps, thay thế ACS AMMS IoT. MVP dùng nhập tay, sau đó tích hợp hardware.
 
-## Thay đổi so với v1
-- ~~Build 5 screens cân xe trong Power Apps~~ → Chỉ build 2 screens đọc/xem dữ liệu
-- ~~Kết nối cân điện tử~~ → ACS đã xử lý
-- ~~Power Fx formulas tính trọng tải~~ → ACS đã tính
-- **Mới:** Power Automate sync SQL ACS → SharePoint
-- **Mới:** Power BI dashboard cho báo cáo cân (Phase 6)
+## Key Insights (từ phân tích ACS)
+- Quy trình 2 lần cân: Cân vào (tare) → Cân ra (gross) → TL hàng = |Vào - Ra|
+- ACS hỗ trợ 3 loại: Cân nhập / Cân xuất / Tự động
+- Fields ACS dùng: Số phiếu, Biển số, Rơ mooc, KH/NCC, Hàng hóa, Kho, Nhà vận tải, Lái xe
+- ACS có 3 camera (biển số + cân vào + cân ra) — Power Apps hỗ trợ camera chụp ảnh
+- Báo cáo ACS: theo KH, hàng hóa, xe, tổng hợp nhập xuất, ca làm việc
 
-## Architecture
+## Data Model (SharePoint Lists)
 
-```
-┌─────────────────────────┐
-│  ACS AMMS IoT Desktop   │  ← Nhân viên cân nhập liệu tại đây
-│  (Đang chạy, không sửa) │  ← Camera + cảm biến + cân điện tử
-│  DB: ACSAMMS_TAMPHUOC   │
-└────────────┬────────────┘
-             │ SQL (read-only)
-             ▼
-┌────────────────────────────┐
-│  On-Premises Data Gateway  │  ← Phase 0
-└────────────┬───────────────┘
-             │
-     ┌───────┴──────────┐
-     ▼                  ▼
-┌──────────┐    ┌──────────────┐
-│ Power    │    │ Power        │
-│ Automate │    │ BI           │
-│ Sync     │    │ Dashboard    │  ← Phase 6
-│ Flow     │    └──────────────┘
-└─────┬────┘
-      │ Create/Update items
-      ▼
-┌──────────────────┐
-│ SharePoint List  │
-│ CAN_PhieuCan_ACS │  ← Read-only mirror
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│ Power Apps       │
-│ 2 screens:       │
-│ - Danh sách cân  │
-│ - Báo cáo cân    │
-└──────────────────┘
-```
+### CAN_PhieuCan
+| Column | Type | Required | Notes |
+|--------|------|----------|-------|
+| Title | Single line | Yes | Số phiếu (PC-2026-0001) |
+| NgayCan | DateTime | Yes | Ngày/giờ tạo phiếu |
+| BienSoXe | Lookup → VT_DanhMucXe | No | Xe đăng ký |
+| BienSoXeText | Single line | No | Nhập tay cho xe vãng lai |
+| RoMooc | Single line | No | Biển số rơ mooc |
+| KhachHang_NCC | Single line | Yes | Khách hàng / NCC |
+| HangHoa | Single line | Yes | Tên hàng hóa |
+| LoaiHang | Choice | Yes | Nguyen lieu / Thanh pham / Phe lieu / Khac |
+| Kho | Single line | No | Kho liên quan |
+| NhaVanTai | Single line | No | Nhà vận tải |
+| LaiXe | Single line | No | Tên lái xe |
+| LoaiCan | Choice | Yes | Can nhap / Can xuat / Tu dong |
+| CanVao_KG | Number | No | Trọng lượng cân vào (kg) |
+| GioCanVao | DateTime | No | Thời gian cân vào |
+| CanRa_KG | Number | No | Trọng lượng cân ra (kg) |
+| GioCanRa | DateTime | No | Thời gian cân ra |
+| TLHang_KG | Number | No | = Abs(CanVao - CanRa), tính trong Power Apps |
+| TaiTrongToiDaXe | Number | No | Copy từ DanhMucXe (kg) |
+| TinhTrangTaiTrong | Choice | No | OK / Qua tai |
+| NguoiCanVao | Person | No | |
+| NguoiCanRa | Person | No | |
+| CaLamViec | Choice | No | Ca 1 / Ca 2 / Ca 3 |
+| HinhAnhCanVao | Thumbnail | No | Ảnh chụp xe cân vào |
+| HinhAnhCanRa | Thumbnail | No | Ảnh chụp xe cân ra |
+| GhiChu | Multiline | No | |
+| ChungTu | Single line | No | Số chứng từ liên quan |
+| TrangThai | Choice | Yes | Cho can ra / Hoan thanh / Huy |
+| LienKetChuyenHang | Lookup → VT_ChuyenHang | No | Link với lệnh vận chuyển |
+| TramCan | Lookup → CAN_TramCan | No | |
+| **Index:** Title, NgayCan, BienSoXe, TrangThai, KhachHang_NCC |
 
-## SharePoint List: CAN_PhieuCan_ACS (mirror từ ACS)
+### CAN_TramCan
+| Column | Type | Required | Notes |
+|--------|------|----------|-------|
+| Title | Single line | Yes | Mã trạm (TC-01) |
+| TenTram | Single line | Yes | |
+| ViTri | Single line | No | |
+| TaiTrongToiDa_Tan | Number | Yes | |
+| TrangThai | Choice | Yes | Hoat dong / Bao tri |
 
-List này là **read-only mirror** — chỉ Power Automate ghi, users không sửa.
+## Screens (5 screens)
 
-| Column | Type | Source từ ACS | Notes |
-|--------|------|--------------|-------|
-| Title | Single line | SoPhieuCan | PK, e.g. 2604021048 |
-| BienSoXe | Single line | BienSo | 60C-53580 |
-| RoMooc | Single line | RoMooc | 60R-01745 |
-| KhachHang_NCC | Single line | KhachHang/NCC | Text (không lookup) |
-| HangHoa | Single line | HangHoa | CỦI, DĂM CAO SU, etc. |
-| Kho | Single line | Kho | |
-| NhaVanTai | Single line | NhaVanTai | |
-| LaiXe | Single line | LaiXe | |
-| TLCanLan1_KG | Number | TL cân lần 1 | |
-| TGCanLan1 | DateTime | TG cân lần 1 | |
-| TLCanLan2_KG | Number | TL cân lần 2 | |
-| TGCanLan2 | DateTime | TG cân lần 2 | |
-| TLHang_KG | Number | TL hàng | = |L1 - L2| |
-| LoaiCan | Choice | Cân nhập / Cân xuất / Tự động | |
-| GhiChu | Single line | Ghi chú | |
-| ChungTu | Single line | Chứng từ | |
-| ACS_SyncedAt | DateTime | — | Thời điểm sync |
-| **Index:** Title, TGCanLan1, BienSoXe, KhachHang_NCC |
-
-## Power Automate: ACS Sync Flow
-
-**Trigger:** Recurrence — mỗi 5 phút
-
-**Logic:**
-```
-1. Get last sync timestamp từ SYS_Counters (Title = "ACS_LastSync")
-2. SQL query:
-   SELECT * FROM [PhieuCan_Table]
-   WHERE ModifiedDate > @{variables('lastSync')}
-   ORDER BY ModifiedDate ASC
-3. For each record:
-   - Check nếu Title (SoPhieu) đã tồn tại trong SharePoint
-     - Có → Update item
-     - Không → Create item
-4. Update SYS_Counters.ACS_LastSync = utcNow()
-```
-
-**Lưu ý:** Tên table thực tế cần xác nhận sau Phase 0 (khảo sát DB schema).
-
-## Power Apps Screens (chỉ 2 screens)
-
-### S01: Danh Sách Phiếu Cân (Read-only)
-**Purpose:** Xem dữ liệu cân từ ACS, filter/search.
+### S01: Cân Vào
+**Purpose:** Tạo phiếu cân mới, nhập thông tin xe và trọng lượng cân vào.
 
 **Layout:**
-- Filter bar: ngày (from/to), biển số xe, khách hàng, loại cân
-- Gallery hiển thị: Số phiếu, Biển số, KH/NCC, Hàng hóa, TL hàng, Thời gian
-- Detail panel khi chọn 1 phiếu
-- Badge "Từ ACS" để phân biệt với dữ liệu Power Apps
+- Toggle: Xe đăng ký (dropdown) / Xe vãng lai (nhập tay)
+- Auto-fill từ xe: TaiTrongToiDa, Lái xe (nếu có chuyến đang chạy)
+- Form: KH/NCC, Hàng hóa, Loại hàng, Kho, Nhà vận tải, Loại cân
+- Nhập cân: CanVao_KG (số), chụp ảnh xe
+- Button: "Lưu Cân Vào"
 
 **Key Formulas:**
 ```
-// Filter — delegation-safe
-Filter('CAN_PhieuCan_ACS',
-    TGCanLan1 >= dpTuNgay.SelectedDate
-    And TGCanLan1 <= DateAdd(dpDenNgay.SelectedDate, 1, TimeUnit.Days)
-    And (IsBlank(txtBienSo.Text) Or StartsWith(BienSoXe, txtBienSo.Text))
-)
-```
-
-```
-// Gallery subtitle — hiển thị trọng lượng
-Text(ThisItem.TLHang_KG, "#,##0") & " kg | " &
-ThisItem.KhachHang_NCC & " | " &
-ThisItem.HangHoa
-```
-
-### S02: Báo Cáo Cân (Summary)
-**Purpose:** Tổng hợp theo ngày/tuần/tháng cho quản lý.
-
-**Layout:**
-- Period selector
-- Summary cards: tổng phiếu, tổng trọng lượng, top khách hàng
-- Embedded Power BI report (nếu có license)
-
-**Key Formulas:**
-```
-// Load collection cho aggregation
-ClearCollect(colBaoCaoCan,
-    Filter('CAN_PhieuCan_ACS',
-        TGCanLan1 >= varStartDate
-        And TGCanLan1 <= varEndDate
-    )
+// Generate số phiếu
+Set(gSoPhieuCan,
+    PowerAutomate_GetNextNumber.Run("PC-" & Text(Year(Today()), "0000")).soPhieu
 );
 
-Set(nTongPhieu, CountRows(colBaoCaoCan));
-Set(nTongTrongLuong, Sum(colBaoCaoCan, TLHang_KG));
+// Lưu cân vào
+Patch('CAN_PhieuCan', Defaults('CAN_PhieuCan'),
+    {
+        Title: gSoPhieuCan,
+        NgayCan: Now(),
+        BienSoXe: If(!IsBlank(gSelectedXe),
+            { Id: gSelectedXe.ID, Value: gSelectedXe.Title }, Blank()),
+        BienSoXeText: If(IsBlank(gSelectedXe), txtBienSoManual.Text, ""),
+        RoMooc: txtRoMooc.Text,
+        KhachHang_NCC: txtKhachHang.Text,
+        HangHoa: txtHangHoa.Text,
+        LoaiHang: ddLoaiHang.Selected,
+        Kho: ddKho.Selected.Value,
+        NhaVanTai: txtNhaVanTai.Text,
+        LaiXe: txtLaiXe.Text,
+        LoaiCan: ddLoaiCan.Selected,
+        CanVao_KG: Value(txtCanVao.Text),
+        GioCanVao: Now(),
+        TaiTrongToiDaXe: If(!IsBlank(gSelectedXe),
+            gSelectedXe.TaiTrongToiDa * 1000, 0),
+        NguoiCanVao: {
+            Claims: "i:0#.f|membership|" & gCurrentUser.Mail,
+            Email: gCurrentUser.Mail
+        },
+        CaLamViec: ddCaLamViec.Selected,
+        TrangThai: {Value: "Cho can ra"}
+    }
+);
 ```
 
-## Liên kết với Module Vận Tải
+### S02: Cân Ra
+**Purpose:** Hoàn thành phiếu cân — nhập trọng lượng cân ra, tính trọng tải hàng.
 
-Dữ liệu cân từ ACS có trường **Biển số xe** và **Nhà vận tải** → có thể liên kết với VT_ChuyenHang:
+**Layout:**
+- Tìm phiếu: theo Số phiếu hoặc Biển số xe (status "Cho can ra")
+- Hiển thị info cân vào (read-only)
+- Nhập: CanRa_KG, chụp ảnh xe
+- Auto-calc: TL hàng = |Vào - Ra|, hiển thị realtime
+- Cảnh báo quá tải (đổi màu đỏ)
+- Button: "Hoàn thành Cân Ra"
 
+**Key Formulas:**
 ```
-// Trong VT_ChuyenHang detail screen, hiển thị phiếu cân liên quan
-Filter('CAN_PhieuCan_ACS',
-    BienSoXe = galChuyenHang.Selected.BienSoXe.Value
-    And TGCanLan1 >= galChuyenHang.Selected.NgayKhoiHanh
+// Tìm phiếu chờ cân ra — delegation-safe
+Filter('CAN_PhieuCan',
+    TrangThai.Value = "Cho can ra"
+    And (StartsWith(Title, txtSearch.Text)
+         Or StartsWith(BienSoXeText, txtSearch.Text))
+)
+
+// Realtime tính trọng tải
+If(
+    IsBlank(txtCanRa.Text) Or IsBlank(lblCanVao.Text),
+    "-- kg",
+    Text(Abs(Value(txtCanRa.Text) - Value(lblCanVao.Text)), "#,##0") & " kg"
+)
+
+// Cảnh báo quá tải — Color
+If(
+    Abs(Value(txtCanRa.Text) - Value(lblCanVao.Text)) > Value(lblTaiTrongMax.Text),
+    Color.Red,
+    RGBA(0, 200, 150, 1)
+)
+
+// Hoàn thành cân ra
+Set(nTrongTai, Abs(Value(txtCanRa.Text) - Value(lblCanVao.Text)));
+Patch('CAN_PhieuCan',
+    LookUp('CAN_PhieuCan', Title = gSoPhieu),
+    {
+        CanRa_KG: Value(txtCanRa.Text),
+        GioCanRa: Now(),
+        TLHang_KG: nTrongTai,
+        NguoiCanRa: { Claims: "i:0#.f|membership|" & gCurrentUser.Mail },
+        TrangThai: {Value: "Hoan thanh"},
+        TinhTrangTaiTrong: If(nTrongTai > Value(lblTaiTrongMax.Text),
+            {Value: "Qua tai"}, {Value: "OK"})
+    }
+);
+// Alert quá tải
+If(nTrongTai > Value(lblTaiTrongMax.Text),
+    PowerAutomate_CanhBaoQuaTai.Run(gSoPhieu, lblBienSo.Text, Text(nTrongTai))
+);
+```
+
+### S03: Danh Sách Phiếu Cân
+**Purpose:** Filter/search phiếu cân theo ngày, xe, KH, trạng thái.
+
+**Key Formulas:**
+```
+Filter('CAN_PhieuCan',
+    NgayCan >= dpTuNgay.SelectedDate
+    And NgayCan <= DateAdd(dpDenNgay.SelectedDate, 1, TimeUnit.Days)
+    And (ddTrangThai.Selected.Value = "Tat ca"
+         Or TrangThai.Value = ddTrangThai.Selected.Value)
 )
 ```
+
+### S04: Báo Cáo Cân
+**Purpose:** Tổng hợp theo ngày/tuần/tháng — tham khảo layout ACS web portal.
+
+**Layout (giống ACS):**
+- Summary: Tổng TL cân vào, Tổng TL cân ra, Tổng TL hàng
+- Bảng chi tiết
+- Filter: ngày, KH, hàng hóa, ca làm việc, kho
+- Export button
+
+### S05: Cảnh Báo Quá Tải
+**Purpose:** Danh sách xe quá tải hôm nay.
+
+## Scale Hardware Integration Roadmap
+
+### MVP (Bây giờ): Nhập tay
+- Operator đọc số trên bảng hiển thị cân → nhập vào Power Apps
+- Chụp ảnh xe bằng camera điện thoại/tablet
+- Đủ dùng để thay thế ACS ngay
+
+### Phase 2: CSV Import
+- Phần mềm cân (indicator software) xuất CSV mỗi lần cân
+- Power Automate watch folder → parse → update SharePoint
+- Giảm nhập tay, giữ Power Apps làm UI
+
+### Phase 3: Desktop Agent + WebSocket
+- App nhỏ (.NET) chạy trên máy trạm cân
+- Đọc COM port RS-232 từ indicator
+- Push số cân lên web qua WebSocket
+- Power Apps nhận realtime (qua Power Automate hoặc custom connector)
 
 ## Todo List
 
-- [ ] Phase 0 hoàn thành (Gateway + SQL access)
-- [ ] Khảo sát ACS database schema (tên tables/columns thực tế)
-- [ ] Tạo SharePoint List CAN_PhieuCan_ACS
-- [ ] Build Power Automate ACS Sync Flow
-- [ ] Build S01: Danh Sách Phiếu Cân
-- [ ] Build S02: Báo Cáo Cân
-- [ ] Test sync: verify dữ liệu khớp ACS
-- [ ] Link phiếu cân với chuyến hàng (VT module)
+- [ ] Thêm CAN lists vào Phase 1 provisioning
+- [ ] Build S01: Cân Vào
+- [ ] Build S02: Cân Ra
+- [ ] Build S03: Danh Sách Phiếu Cân
+- [ ] Build S04: Báo Cáo Cân
+- [ ] Build S05: Cảnh Báo Quá Tải
+- [ ] Build Flow cảnh báo quá tải (Phase 5)
+- [ ] Test quy trình cân 2 lần end-to-end
+- [ ] Document scale hardware roadmap
 
 ## Success Criteria
 
-- Dữ liệu cân từ ACS xuất hiện trong SharePoint/Power Apps trong vòng 5 phút
-- Filter/search phiếu cân delegation-safe
-- Không ảnh hưởng hiệu suất ACS (read-only)
-- Users KHÔNG nhập liệu cân trong Power Apps — chỉ xem
+- Quy trình 2 lần cân hoạt động: Cân Vào → Cân Ra → TL hàng tính đúng
+- Cảnh báo quá tải hiển thị + Teams notification
+- Search phiếu cân delegation-safe
+- Báo cáo tổng hợp giống ACS web portal
+- Camera chụp ảnh xe hoạt động
+- Hỗ trợ cả xe đăng ký và xe vãng lai
