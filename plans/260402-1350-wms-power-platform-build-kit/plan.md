@@ -7,9 +7,9 @@ blockedBy: []
 blocks: []
 ---
 
-# WMS Power Platform Build Kit (v3 — Full Build)
+# WMS Power Platform Build Kit (v4 — Final)
 
-Build kit cho hệ thống WMS 3 modules trên Power Platform. Tự build toàn bộ, thay thế ACS.
+Kho + Vận tải build mới trên Power Apps. Cân xe giữ ACS AMMS IoT, đọc data từ SQL Server.
 
 ## Context
 
@@ -18,68 +18,54 @@ Build kit cho hệ thống WMS 3 modules trên Power Platform. Tự build toàn 
 - **Stack:** Power Apps Canvas + SharePoint Online + Power Automate + Power BI
 - **Scale:** 100+ users, 3 modules
 - **Timeline:** No fixed deadline
-- **Quyết định:** Bỏ ACS AMMS IoT (đang thuê), tự build module Cân xe trên Power Apps
-- **Hardware cân:** Sẽ cần giải pháp kết nối cân điện tử (manual entry MVP, sau đó CSV/API)
+
+## Hệ thống hiện có
+
+- **Cân xe:** ACS AMMS IoT (desktop app tại trạm cân)
+  - DB: SQL Server `ACSAMMS_TAMPHUOC`
+  - 3 camera + 2 cảm biến + đọc cân realtime
+  - Dữ liệu sync về server SQL
+  - Web portal có sẵn báo cáo (Inbound/Outbound/Delivery)
+- **Kho:** Chưa có → build mới
+- **Vận tải:** Chưa có → build mới
 
 ## Phases
 
 | # | Phase | Status | Priority | Effort |
 |---|-------|--------|----------|--------|
-| 1 | [SharePoint Provisioning Scripts](phase-01-sharepoint-provisioning.md) | pending | P0 | High |
-| 2 | [Module Kho Reference Docs](phase-02-module-kho.md) | pending | P0 | Medium |
-| 3 | [Module Van Tai Reference Docs](phase-03-module-van-tai.md) | pending | P0 | Medium |
-| 4 | [Module Can Xe Reference Docs](phase-04-module-can-xe.md) | pending | P0 | High |
-| 5 | [Power Automate Flow Configs](phase-05-power-automate-flows.md) | pending | P0 | High |
-| 6 | [Security & Deployment Guide](phase-06-security-deployment.md) | pending | P1 | Medium |
+| 1 | [Data Gateway + ACS Connection](phase-01-data-gateway.md) | pending | P0 | Low |
+| 2 | [SharePoint Provisioning](phase-02-sharepoint-provisioning.md) | pending | P0 | Medium |
+| 3 | [Module Kho (Power Apps)](phase-03-module-kho.md) | pending | P0 | Medium |
+| 4 | [Module Vận Tải (Power Apps)](phase-04-module-van-tai.md) | pending | P0 | Medium |
+| 5 | [Power Automate Flows](phase-05-power-automate-flows.md) | pending | P0 | Medium |
+| 6 | [Power BI Dashboards](phase-06-power-bi-dashboards.md) | pending | P1 | Medium |
+| 7 | [Security & Deployment](phase-07-security-deployment.md) | pending | P1 | Medium |
 
 ## Dependencies
 
-- Phase 1 (SharePoint) must be built first — all other phases reference its data model
-- Phases 2, 3, 4 are independent, can be built in parallel
-- Phase 5 (flows) depends on Phase 1 data model
-- Phase 6 (security) depends on all prior phases
+```
+Phase 1 (Gateway) ──→ Phase 6 (Power BI — cân xe data)
+Phase 2 (SharePoint) ──→ Phase 3 (Kho)
+                     ──→ Phase 4 (Vận tải)
+                     ──→ Phase 5 (Flows)
+Phase 1 + 2 can run in parallel
+Phase 3 + 4 can run in parallel
+All phases ──→ Phase 7 (Security & Deploy)
+```
 
-## Critical Fixes
+## Scope rõ ràng
 
-1. Stock counter race condition → queue pattern (`KHO_GiaoDichLog`)
+| Module | Approach | Build gì |
+|--------|----------|---------|
+| **Cân xe** | Giữ ACS AMMS IoT | Gateway + Power BI dashboard đọc SQL |
+| **Kho** | Build mới | 7 screens Power Apps + SharePoint Lists + Flows |
+| **Vận tải** | Build mới | 6 screens Power Apps + SharePoint Lists + Flows |
+| **Báo cáo** | Power BI | 3 dashboards (Cân từ SQL, Kho + VT từ SharePoint) |
+
+## Critical Fixes (cho Kho + VT)
+
+1. Stock race condition → queue pattern (`KHO_GiaoDichLog`)
 2. Phieu auto-number → `SYS_Counters` + Power Automate atomic increment
-3. All delegation violations fixed (no `Year()`, no `CountRows` on SharePoint)
-4. Monthly archival strategy for staying under 5000-item threshold
-5. Proper security at SharePoint level, not just UI hiding
-
-## Cân xe Strategy (thay thế ACS)
-
-- **Phase 1 (MVP):** Nhập tay số cân vào Power Apps + chụp ảnh xe
-- **Phase 2 (sau):** Scale software xuất CSV → Power Automate import tự động
-- **Phase 3 (nâng cao):** Desktop agent đọc COM port → WebSocket → Power Apps realtime
-- Data model tham khảo từ ACS AMMS IoT (đã phân tích giao diện)
-
-## Insights từ ACS (áp dụng vào thiết kế)
-
-Từ phân tích ACS desktop + web portal:
-- Hỗ trợ 2 lần cân (cân vào + cân ra) trên cùng 1 phiếu
-- 3 camera giám sát (biển số + cân vào + cân ra)
-- Phân loại: Cân nhập / Cân xuất / Tự động
-- Báo cáo: theo KH, hàng hóa, xe, tổng hợp nhập xuất
-- Fields: Số phiếu, Biển số, Rơ mooc, KH/NCC, Hàng hóa, Kho, Nhà vận tải, Lái xe
-
-## Output Structure
-
-```
-plans/260402-1350-wms-power-platform-build-kit/
-├── plan.md
-├── phase-01-sharepoint-provisioning.md
-├── phase-02-module-kho.md
-├── phase-03-module-van-tai.md
-├── phase-04-module-can-xe.md
-├── phase-05-power-automate-flows.md
-└── phase-06-security-deployment.md
-
-scripts/
-├── provision-sharepoint-site.ps1
-├── provision-module-kho-lists.ps1
-├── provision-module-vantai-lists.ps1
-├── provision-module-canxe-lists.ps1
-├── provision-system-lists.ps1
-└── provision-indexes-and-views.ps1
-```
+3. Delegation-safe queries (no `Year()`, no `CountRows` on SP)
+4. Monthly archival → keep lists under 5000 items
+5. Security at SharePoint level, not just UI hiding
